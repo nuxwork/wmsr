@@ -1,0 +1,14 @@
+{
+    host: 0.0.0.0,
+    listen: 16080,
+    wms: [
+        {
+            project: "lvyou",
+            server: "arcgis",
+            service: "wms",
+            url: "http://59.110.28.240:6080/arcgis/services/ceshi/YSC/MapServer/WmsServer",
+            crs: "EPSG:3857",
+            //crs: "EPSG:4326",
+        },
+    ]
+}
