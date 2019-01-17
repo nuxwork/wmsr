@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"image"
+	"image/draw"
 	"image/png"
 	"io/ioutil"
 	"net/http"
@@ -16,26 +18,79 @@ import (
 	"github.com/boringwork/wmsr/at"
 )
 
-// http://218.95.176.28:6080/arcgis/services/SHT_NX/SHT_4A/MapServer/WmsServer
-// http://218.95.176.28:6080/arcgis/services/SHT_NX/SHT_4A/MapServer/WMSServer?request=GetCapabilities&service=WMS
-
 func IndexHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*") //允许访问所有域
 	w.Header().Set("Content-Type", "image/png")
 
 	// fmt.Println("from: ", r.URL.String())
 	query := r.URL.Query()
-	url := getRedirect(query)
+	ret := getRedirect(query)
 	// fmt.Println("  to: ", url)
-	if url != "" {
-		http.Redirect(w, r, url, 301)
-	} else {
+	if len(ret) == 0 {
 		png.Encode(w, EmptyPNG)
+	} else if len(ret) == 1 {
+		http.Redirect(w, r, ret[0], 301)
+	} else if len(ret) > 1 {
+		png.Encode(w, mergeImages(ret))
 	}
 }
 
-func getRedirect(query url.Values) string {
-	ret := ""
+func mergeImages(urls []string) *image.RGBA {
+	l := len(urls)
+	ch := make(chan []byte, l)
+	for _, u := range urls {
+		go func(s string) {
+			resp, err := http.Get(s)
+			if err != nil {
+				fmt.Printf(`Error: request "%s", %s`, s, err.Error())
+				ch <- nil
+				return
+			} else {
+				defer resp.Body.Close()
+				body, err := ioutil.ReadAll(resp.Body)
+				if err != nil {
+					fmt.Printf("Error: %s when read response %s\n", err.Error(), s)
+					ch <- nil
+					return
+				}
+
+				// fmt.Println("request done")
+				ch <- body
+			}
+
+		}(u)
+	}
+
+	var rgba *image.RGBA = nil
+	var bounds image.Rectangle
+
+	for i := 0; i != l; i++ {
+		imgBytes := <-ch
+		if imgBytes == nil {
+			continue
+		}
+
+		img, _, err := image.Decode(bytes.NewReader(imgBytes))
+		if err != nil {
+			fmt.Printf("Error: %s when decode image %s\n", err.Error())
+			continue
+		}
+
+		if rgba == nil {
+			bounds = img.Bounds()
+			rgba = image.NewRGBA(bounds)
+			draw.Draw(rgba, bounds, img, image.Point{0, 0}, draw.Src)
+		}
+
+		draw.Draw(rgba, bounds, img, image.Point{0, 0}, draw.Over)
+
+	}
+
+	return rgba
+}
+
+func getRedirect(query url.Values) []string {
+	res := []string{}
 	bbox := strings.Split(query.Get("BBOX"), ",")
 	b := BBox{}
 	b.CRS = query.Get("CRS")
@@ -44,57 +99,50 @@ func getRedirect(query url.Values) string {
 	b.MaxX, _ = strconv.ParseFloat(bbox[2], 64)
 	b.MaxY, _ = strconv.ParseFloat(bbox[3], 64)
 
-	c := []string{}
 	for k, v := range WMSData {
 		if !strings.EqualFold(b.CRS, k.CRS) {
 			continue
 		}
 
+		// 任何一个请求点在景区内
 		if k.Contain(b.MinX, b.MinY) ||
 			k.Contain(b.MaxX, b.MaxY) ||
 			k.Contain(b.MaxX, b.MinY) ||
 			k.Contain(b.MinX, b.MaxY) {
-			ret = v
-			break
+			res = append(res, v)
 		}
 
+		// 景区任何一个点在请求范围内
 		if b.Contain(k.MinX, k.MinY) ||
 			b.Contain(k.MaxX, k.MaxY) ||
 			b.Contain(k.MaxX, k.MinY) ||
 			b.Contain(k.MinX, k.MaxY) {
-			ret = v
-			break
-		}
-
-		if b.Contain(k.MinX, k.MinY) && b.Contain(k.MaxX, k.MaxY) {
-			c = append(c, v)
+			res = append(res, v)
 		}
 	}
 
-	if ret == "" && len(c) >= 1 {
-		ret = c[0]
-	}
-
-	// 替换参数
-	if ret != "" {
-		u, e := url.Parse(ret)
-		if e != nil {
-			fmt.Printf(`Error: Can't Parse %s, %s\n`, ret, e.Error())
-			return ""
-		}
-		q := u.Query()
-		_, hasLayer := q["layers"]
-
-		for k, _ := range query {
-			if !hasLayer && strings.EqualFold(k, "layers") {
-				q.Set(k, query.Get(k))
+	ret := []string{}
+	if len(res) > 0 {
+		for _, s := range res {
+			u, e := url.Parse(s)
+			if e != nil {
+				fmt.Printf(`Error: Can't Parse %s, %s\n`, s, e.Error())
+				continue
 			}
-			if !strings.EqualFold(k, "version") && !strings.EqualFold(k, "layers") {
-				q.Set(k, query.Get(k))
+			q := u.Query()
+			_, hasLayer := q["layers"]
+
+			for k, _ := range query {
+				if !hasLayer && strings.EqualFold(k, "layers") {
+					q.Set(k, query.Get(k))
+				}
+				if !strings.EqualFold(k, "version") && !strings.EqualFold(k, "layers") {
+					q.Set(k, query.Get(k))
+				}
 			}
+			u.RawQuery = q.Encode()
+			ret = append(ret, u.String())
 		}
-		u.RawQuery = q.Encode()
-		ret = u.String()
 	}
 
 	return ret
