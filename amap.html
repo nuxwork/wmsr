@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="initial-scale=1.0, user-scalable=no, width=device-width">
+    <title>图片图层</title>
+    <script src="https://webapi.amap.com/maps?v=1.4.12&key=ce99b5034e1b9e0e2c2d727f20945eeb"></script>
+    <style>
+        html,
+        body,
+        #container {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="container"></div>
+    <script>
+        var map = new AMap.Map('container', {
+            resizeEnable: true,
+            center: [105.965312,37.840575],
+            zoom: 15,
+            layers: [
+                new AMap.TileLayer(),
+                new AMap.TileLayer.WMS({
+                    // url: 'http://59.110.28.240:6080/arcgis/services/ceshi/YSC/MapServer/WmsServer',
+                    url: 'http://192.168.10.88:16080',
+                    // url: 'http://218.95.176.28:6080/arcgis/services/SHT/HBH/MapServer/WmsServer',
+                    // url: 'http://localhost:6080/arcgis/services/zq6/MapServer/WmsServer',
+                    params: {'styles': '' , 'version': '1.3.0', "layers":"0"},
+                    opacity: 1,
+                }),
+            ]
+        });
+    </script>
+</body>
+
+</html>
